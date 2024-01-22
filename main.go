@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -52,6 +53,12 @@ type Hole19Rounds []struct {
 	Multiplayers []any `json:"multiplayers"`
 }
 
+type MostBirdiesTracker struct {
+	Course       string
+	Date         time.Time
+	HolesBirdied []int
+}
+
 func main() {
 	rawData, err := os.ReadFile("golf-rounds.json")
 	if err != nil {
@@ -89,6 +96,7 @@ func main() {
 		"GIR %",
 		"BM %",
 		"BPR",
+		"Most Birdies\nIn 1 Round",
 	})
 	for year, rounds := range annualRoundMap {
 		t.AppendRow(yearAggScores(year, rounds))
@@ -100,11 +108,16 @@ func main() {
 }
 
 func yearAggScores(year int, rounds Hole19Rounds) table.Row {
-	var tHoles, tDeagles, tEagles, tBirdies, tPars, tBogeys, tDbogeys, tTbogeys, gir, bM int
+	var tHoles, tMinus3, tMinus2, tMinus1, tPars, tPlus1, tPlus2, tPlus3, gir, bM int
+	var mostBirdsPerRound []MostBirdiesTracker
 	for _, r := range rounds {
+		var holesBirdiedPerRoundCounter []int
 		for _, hole := range r.Scores {
 			tHoles++
 			diff := hole.TotalOfStrokes - hole.Hole.Par
+			if diff < 0 {
+				holesBirdiedPerRoundCounter = append(holesBirdiedPerRoundCounter, hole.Hole.Sequence)
+			}
 			if hole.GreenInRegulation {
 				gir++
 				if diff < 0 {
@@ -113,21 +126,45 @@ func yearAggScores(year int, rounds Hole19Rounds) table.Row {
 			}
 			switch diff {
 			case -3:
-				tDeagles++
+				tMinus3++
 			case -2:
-				tEagles++
+				tMinus2++
 			case -1:
-				tBirdies++
+				tMinus1++
 			case 0:
 				tPars++
 			case 1:
-				tBogeys++
+				tPlus1++
 			case 2:
-				tDbogeys++
+				tPlus2++
 			case 3:
-				tTbogeys++
+				tPlus3++
 			default:
 			}
+		}
+		t, err := time.Parse(time.DateTime+" MST", r.StartedAt)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if len(mostBirdsPerRound) == 0 && len(holesBirdiedPerRoundCounter) > 0 {
+			mostBirdsPerRound = append(mostBirdsPerRound, MostBirdiesTracker{
+				Course:       r.Course.Name,
+				Date:         t,
+				HolesBirdied: holesBirdiedPerRoundCounter,
+			})
+		} else if len(mostBirdsPerRound) > 0 && len(holesBirdiedPerRoundCounter) == len(mostBirdsPerRound[0].HolesBirdied) {
+			mostBirdsPerRound = append(mostBirdsPerRound, MostBirdiesTracker{
+				Course:       r.Course.Name,
+				Date:         t,
+				HolesBirdied: holesBirdiedPerRoundCounter,
+			})
+		} else if len(mostBirdsPerRound) > 0 && len(holesBirdiedPerRoundCounter) > len(mostBirdsPerRound[0].HolesBirdied) {
+			mostBirdsPerRound = nil
+			mostBirdsPerRound = append(mostBirdsPerRound, MostBirdiesTracker{
+				Course:       r.Course.Name,
+				Date:         t,
+				HolesBirdied: holesBirdiedPerRoundCounter,
+			})
 		}
 	}
 	girPercent := (float64(gir) / float64(tHoles)) * 100
@@ -137,15 +174,24 @@ func yearAggScores(year int, rounds Hole19Rounds) table.Row {
 		year,
 		len(rounds),
 		tHoles,
-		tDeagles,
-		tEagles,
-		tBirdies,
+		tMinus3,
+		tMinus2,
+		tMinus1,
 		tPars,
-		tBogeys,
-		tDbogeys,
-		tTbogeys,
+		tPlus1,
+		tPlus2,
+		tPlus3,
 		fmt.Sprintf("%v%%", math.Round(girPercent*100)/100),
 		fmt.Sprintf("%v%%", math.Round(birdiesMadeWithGIR*100)/100),
 		fmt.Sprintf("%v", math.Round(float64(bM)/(float64(tHoles)/18)*100)/100),
+		newLineBirds(mostBirdsPerRound),
 	}
+}
+
+func newLineBirds(birdsList []MostBirdiesTracker) string {
+	var s string
+	for _, bd := range birdsList {
+		s += fmt.Sprintf("- %v at %v birdied %v\n", bd.Date.Local().Format(time.DateOnly), bd.Course, bd.HolesBirdied)
+	}
+	return strings.TrimSuffix(s, "\n")
 }
